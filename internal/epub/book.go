@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	raitu "github.com/raitucarp/epub"
+	"github.com/raitucarp/epub/ncx"
 )
 
 type Book struct {
@@ -48,11 +49,94 @@ func Open(path string) (*Book, error) {
 		b.Author = a[0]
 	}
 
-	ids := r.ListContentDocumentIds()
-	b.Chapters = make([]Chapter, 0, len(ids))
+	b.Chapters = b.loadChapters()
+	if len(b.Chapters) == 0 {
+		return nil, fmt.Errorf("nenhum capítulo legível encontrado")
+	}
+
+	return b, nil
+}
+
+// Cover devolve a imagem de capa do livro, se houver.
+func (b *Book) Cover() image.Image {
+	if cover := b.reader.Cover(); cover != nil {
+		return *cover
+	}
+	return nil
+}
+
+// loadChapters prefere o sumário do próprio EPUB (NCX); sem ele, cai na
+// heurística sobre os documentos do spine.
+func (b *Book) loadChapters() []Chapter {
+	if chapters := b.chaptersFromTOC(); len(chapters) >= 2 {
+		return chapters
+	}
+	return b.chaptersFromSpine()
+}
+
+func (b *Book) chaptersFromTOC() []Chapter {
+	doc := b.reader.NavigationCenterExtended()
+	if doc == nil {
+		return nil
+	}
+
+	byHref := map[string]string{}
+	byBase := map[string]string{}
+	for _, res := range b.reader.Resources() {
+		href := path.Clean(res.Href)
+		byHref[href] = res.ID
+		base := strings.TrimSuffix(path.Base(href), path.Ext(href))
+		if _, ok := byBase[base]; !ok {
+			byBase[base] = res.ID
+		}
+	}
+
+	var chapters []Chapter
+	seen := map[string]bool{}
+
+	var walk func(points []ncx.NavPoint)
+	walk = func(points []ncx.NavPoint) {
+		for _, point := range points {
+			if ch, ok := chapterFromNavPoint(point, byHref, byBase, seen); ok {
+				seen[ch.ID] = true
+				chapters = append(chapters, ch)
+			}
+			walk(point.NavPoints)
+		}
+	}
+	walk(doc.NavMap.NavPoints)
+
+	return chapters
+}
+
+func chapterFromNavPoint(point ncx.NavPoint, byHref, byBase map[string]string, seen map[string]bool) (Chapter, bool) {
+	title := strings.Trim(strings.TrimSpace(point.NavLabel.Text), "— ")
+	if title == "" {
+		return Chapter{}, false
+	}
+
+	src := strings.SplitN(point.Content.Src, "#", 2)[0]
+	if src == "" {
+		return Chapter{}, false
+	}
+
+	id := byHref[path.Clean(src)]
+	if id == "" {
+		id = byBase[strings.TrimSuffix(path.Base(src), path.Ext(src))]
+	}
+	if id == "" || seen[id] {
+		return Chapter{}, false
+	}
+
+	return Chapter{ID: id, Title: title, Index: len(seen)}, true
+}
+
+func (b *Book) chaptersFromSpine() []Chapter {
+	ids := b.reader.ListContentDocumentIds()
+	chapters := make([]Chapter, 0, len(ids))
 
 	for i, id := range ids {
-		md := r.ReadContentMarkdownById(id)
+		md := b.reader.ReadContentMarkdownById(id)
 
 		// pula documentos muito curtos (capa, copyright, avisos)
 		if len(strings.TrimSpace(md)) < 400 {
@@ -64,18 +148,13 @@ func Open(path string) (*Book, error) {
 			title = fmt.Sprintf("Seção %d", i+1)
 		}
 
-		b.Chapters = append(b.Chapters, Chapter{
+		chapters = append(chapters, Chapter{
 			ID:    id,
 			Title: title,
 			Index: i,
 		})
 	}
-
-	if len(b.Chapters) == 0 {
-		return nil, fmt.Errorf("nenhum capítulo legível encontrado")
-	}
-
-	return b, nil
+	return chapters
 }
 
 func (b *Book) Text(ch Chapter) string {
