@@ -1,0 +1,78 @@
+{
+  "document": {
+    "block_suffix": "\n",
+    "color": "252",
+    "margin": 2
+  },
+  "block_quote": {
+    "indent": 1,
+    "indent_token": "▎ ",
+    "color": "245"
+  },
+  "paragraph": {},
+  "list": {
+    "level_indent": 2
+  },
+  "heading": {
+    "block_prefix": "\n",
+    "block_suffix": "\n",
+    "bold": true,
+    "color": "223"
+  },
+  "h1": {
+    "bold": true
+  },
+  "h2": {
+    "bold": true
+  },
+  "h3": {
+    "bold": true
+  },
+  "h4": {
+    "bold": true
+  },
+  "h5": {
+    "bold": true
+  },
+  "h6": {
+    "bold": true,
+    "italic": true
+  },
+  "strikethrough": {
+    "crossed_out": true
+  },
+  "emph": {
+    "italic": true
+  },
+  "strong": {
+    "bold": true
+  },
+  "hr": {
+    "color": "240",
+    "format": "\n────────\n"
+  },
+  "item": {
+    "block_prefix": "• "
+  },
+  "enumeration": {
+    "block_prefix": ". "
+  },
+  "link": {
+    "color": "111",
+    "underline": true
+  },
+  "link_text": {
+    "color": "111"
+  },
+  "code": {
+    "prefix": " ",
+    "suffix": " ",
+    "color": "252",
+    "background_color": "236"
+  },
+  "code_block": {
+    "color": "252",
+    "background_color": "236",
+    "margin": 2
+  }
+}
