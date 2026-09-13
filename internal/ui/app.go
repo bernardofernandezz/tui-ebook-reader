@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bernardofernandezz/tui-ebook-reader/internal/bookmarks"
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,20 +26,34 @@ const (
 
 var chromeStyle = lipgloss.NewStyle().Faint(true)
 
+type mode int
+
+const (
+	modeReading mode = iota
+	modeBookmarks
+)
+
 type model struct {
 	book     *epub.Book
 	chapter  int
 	viewport viewport.Model
 	renderer *glamour.TermRenderer
+	store    *bookmarks.Store
+	marks    []bookmarks.Bookmark
+	mode     mode
+	cursor   int
+	offset   int // rolagem salva ao abrir a lista de bookmarks
 	ready    bool
 	width    int
 	height   int
 }
 
 func New(book *epub.Book) model {
+	store := bookmarks.Load()
 	return model{
-		book:    book,
-		chapter: 0,
+		book:  book,
+		store: store,
+		marks: store.List(book.Path),
 	}
 }
 
@@ -51,6 +66,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.mode == modeBookmarks {
+			return m.updateBookmarks(msg)
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -64,6 +82,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chapter--
 				m.setContent()
 			}
+		case "b":
+			// "b" também é page-up no viewport; por isso não repassamos a tecla
+			m.toggleBookmark()
+			return m, nil
+		case "B":
+			m.openBookmarks()
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -156,6 +181,102 @@ func (m *model) renderSegment(out *strings.Builder, md string) {
 	out.WriteString(rendered)
 }
 
+func (m model) updateBookmarks(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "esc", "B":
+		m.closeBookmarks()
+	case "j", "down":
+		if m.cursor < len(m.marks)-1 {
+			m.cursor++
+			m.setBookmarkList()
+		}
+	case "k", "up":
+		if m.cursor > 0 {
+			m.cursor--
+			m.setBookmarkList()
+		}
+	case "enter":
+		m.jumpToBookmark()
+	}
+	return m, nil
+}
+
+func (m *model) toggleBookmark() {
+	m.store.Toggle(m.book.Path, bookmarks.Bookmark{
+		Chapter: m.chapter,
+		Percent: int(m.viewport.ScrollPercent() * 100),
+		Label:   m.book.Chapters[m.chapter].Title,
+	})
+	m.marks = m.store.List(m.book.Path)
+}
+
+func (m *model) openBookmarks() {
+	m.mode = modeBookmarks
+	m.offset = m.viewport.YOffset
+	m.cursor = 0
+	m.setBookmarkList()
+}
+
+func (m *model) closeBookmarks() {
+	m.mode = modeReading
+	m.setContent()
+	m.viewport.SetYOffset(m.offset)
+}
+
+func (m *model) jumpToBookmark() {
+	if len(m.marks) == 0 {
+		return
+	}
+	bm := m.marks[m.cursor]
+	m.chapter = bm.Chapter
+	m.mode = modeReading
+	m.setContent()
+	m.scrollToPercent(bm.Percent)
+}
+
+func (m *model) scrollToPercent(percent int) {
+	maxOffset := m.viewport.TotalLineCount() - m.viewport.VisibleLineCount()
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	m.viewport.SetYOffset(percent * maxOffset / 100)
+}
+
+func (m *model) setBookmarkList() {
+	var lines []string
+	if len(m.marks) == 0 {
+		lines = append(lines, "nenhum bookmark ainda; pressione b durante a leitura")
+	}
+	for i, bm := range m.marks {
+		line := fmt.Sprintf("%s · capítulo %d · %d%%", bm.Label, bm.Chapter+1, bm.Percent)
+		if i == m.cursor {
+			line = lipgloss.NewStyle().Bold(true).Render("▸ " + line)
+		} else {
+			line = "  " + line
+		}
+		lines = append(lines, line)
+	}
+
+	content := lipgloss.NewStyle().
+		Width(m.width).
+		Align(lipgloss.Center).
+		Render(strings.Join(lines, "\n"))
+
+	m.viewport.SetContent(content)
+	m.viewport.GotoTop()
+}
+
+func (m model) hasBookmark(chapter int) bool {
+	for _, b := range m.marks {
+		if b.Chapter == chapter {
+			return true
+		}
+	}
+	return false
+}
+
 func (m model) View() string {
 	if !m.ready {
 		return "carregando..."
@@ -163,13 +284,24 @@ func (m model) View() string {
 
 	ch := m.book.Chapters[m.chapter]
 
-	header := chromeStyle.Render(fmt.Sprintf("%s · %s", m.book.Title, ch.Title))
-	footer := chromeStyle.Render(fmt.Sprintf(
-		"capítulo %d/%d · %.0f%% · q sair",
-		m.chapter+1,
-		len(m.book.Chapters),
-		m.viewport.ScrollPercent()*100,
-	))
+	var header, footer string
+	if m.mode == modeBookmarks {
+		header = chromeStyle.Render(fmt.Sprintf("bookmarks · %s", m.book.Title))
+		footer = chromeStyle.Render("j/k mover · enter abrir · esc fechar")
+	} else {
+		star := ""
+		if m.hasBookmark(m.chapter) {
+			star = " · ★"
+		}
+		header = chromeStyle.Render(fmt.Sprintf("%s · %s", m.book.Title, ch.Title))
+		footer = chromeStyle.Render(fmt.Sprintf(
+			"capítulo %d/%d · %.0f%%%s · b marca · B lista · q sair",
+			m.chapter+1,
+			len(m.book.Chapters),
+			m.viewport.ScrollPercent()*100,
+			star,
+		))
+	}
 
 	return strings.Join([]string{
 		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, header),
