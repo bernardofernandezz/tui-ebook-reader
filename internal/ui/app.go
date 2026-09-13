@@ -9,6 +9,7 @@ import (
 
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/store"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -26,7 +27,10 @@ const (
 	barWidth      = 12
 )
 
-var chromeStyle = lipgloss.NewStyle().Faint(true)
+var (
+	chromeStyle = lipgloss.NewStyle().Faint(true)
+	ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+)
 
 var helpLines = []string{
 	"←/→ ou h/l   capítulo anterior / próximo",
@@ -35,6 +39,8 @@ var helpLines = []string{
 	"d/u          meia página",
 	"espaço       página para baixo",
 	"pgup         página para cima",
+	"/            buscar no capítulo",
+	"n/N          próxima / anterior ocorrência",
 	"b            marcar / desmarcar bookmark",
 	"B            lista de bookmarks",
 	"?            esta ajuda",
@@ -42,21 +48,27 @@ var helpLines = []string{
 }
 
 type model struct {
-	book     *epub.Book
-	cfg      *store.Config
-	st       *store.State
-	chapter  int
-	viewport viewport.Model
-	renderer *glamour.TermRenderer
-	overlay  *overlay
-	coverArt string
-	offset   int // rolagem salva ao abrir um overlay
-	cacheCh  int
-	cacheW   int
-	cache    string
-	ready    bool
-	width    int
-	height   int
+	book      *epub.Book
+	cfg       *store.Config
+	st        *store.State
+	chapter   int
+	viewport  viewport.Model
+	renderer  *glamour.TermRenderer
+	overlay   *overlay
+	input     textinput.Model
+	coverArt  string
+	offset    int // rolagem salva ao abrir um overlay
+	cacheCh   int
+	cacheW    int
+	cache     string
+	resume    int // percentual a restaurar depois do primeiro layout
+	searching bool
+	query     string
+	matches   []int
+	matchIdx  int
+	ready     bool
+	width     int
+	height    int
 }
 
 func New(book *epub.Book, cfg *store.Config, st *store.State) *model {
@@ -69,6 +81,17 @@ func New(book *epub.Book, cfg *store.Config, st *store.State) *model {
 	if cover := book.Cover(); cover != nil {
 		m.coverArt = renderImage(cover)
 	}
+
+	if pos := st.Book(book.Path).Position; pos.Chapter >= 0 && pos.Chapter < len(book.Chapters) {
+		m.chapter = pos.Chapter
+		m.resume = pos.Percent
+	}
+
+	m.input = textinput.New()
+	m.input.Prompt = "/ "
+	m.input.Placeholder = "buscar no capítulo"
+	m.input.CharLimit = 64
+
 	return m
 }
 
@@ -84,13 +107,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.overlay != nil {
 			return m.updateOverlay(msg)
 		}
+		if m.searching {
+			return m.updateSearch(msg)
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "right", "l", "n":
+		case "right", "l":
 			m.goToChapter(m.chapter + 1)
 		case "left", "h", "p":
 			m.goToChapter(m.chapter - 1)
+		case "n":
+			if m.query != "" {
+				m.jumpMatch(1)
+			} else {
+				m.goToChapter(m.chapter + 1)
+			}
+		case "N":
+			m.jumpMatch(-1)
 		case "b":
 			// "b" também é page-up no viewport; por isso não repassamos a tecla
 			m.toggleBookmark()
@@ -104,6 +138,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.openHelp()
 			return m, nil
+		case "/":
+			m.searching = true
+			m.input.SetValue("")
+			return m, m.input.Focus()
+		case "esc":
+			m.clearSearch()
 		}
 
 	case tea.WindowSizeMsg:
@@ -131,6 +171,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.setContent()
 			}
+			if m.query != "" {
+				m.clearSearch()
+			}
+			if m.resume > 0 {
+				m.scrollToPercent(m.resume)
+				m.resume = 0
+			}
 		}
 	}
 
@@ -154,6 +201,7 @@ func (m *model) goToChapter(chapter int) {
 	if chapter < 0 || chapter >= len(m.book.Chapters) {
 		return
 	}
+	m.clearSearch()
 	m.chapter = chapter
 	m.setContent()
 	m.savePosition()
@@ -162,20 +210,23 @@ func (m *model) goToChapter(chapter int) {
 var imageRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)\s]+)[^)]*\)`)
 
 func (m *model) setContent() {
-	content := m.chapterContent()
-
-	if m.chapter == 0 && m.coverArt != "" {
-		content = m.coverArt + "\n" + content
-	}
-
 	// centraliza a coluna de leitura no terminal
 	centered := lipgloss.NewStyle().
 		Width(m.width).
 		Align(lipgloss.Center).
-		Render(content)
+		Render(m.chapterText())
 
 	m.viewport.SetContent(centered)
 	m.viewport.GotoTop()
+}
+
+// chapterText é o conteúdo do capítulo atual, com a capa na primeira página.
+func (m *model) chapterText() string {
+	text := m.chapterContent()
+	if m.chapter == 0 && m.coverArt != "" {
+		text = m.coverArt + "\n" + text
+	}
+	return text
 }
 
 // chapterContent renderiza o capítulo atual, com cache por capítulo/largura.
@@ -309,6 +360,64 @@ func (m *model) openHelp() {
 	m.openOverlay("ajuda", helpLines, nil)
 }
 
+func (m *model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.stopSearch()
+		return m, nil
+	case "enter":
+		m.startSearch()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+// startSearch procura a consulta nas linhas renderizadas do capítulo atual.
+func (m *model) startSearch() {
+	m.searching = false
+	m.input.Blur()
+
+	m.query = strings.TrimSpace(m.input.Value())
+	m.matches = nil
+	m.matchIdx = 0
+	if m.query == "" {
+		return
+	}
+
+	needle := strings.ToLower(m.query)
+	for i, line := range strings.Split(m.chapterText(), "\n") {
+		plain := strings.ToLower(ansiPattern.ReplaceAllString(line, ""))
+		if strings.Contains(plain, needle) {
+			m.matches = append(m.matches, i)
+		}
+	}
+	m.jumpMatch(0)
+}
+
+func (m *model) stopSearch() {
+	m.searching = false
+	m.input.Blur()
+}
+
+func (m *model) clearSearch() {
+	m.stopSearch()
+	m.query = ""
+	m.matches = nil
+	m.matchIdx = 0
+}
+
+// jumpMatch anda para a próxima ocorrência (delta 1) ou anterior (delta -1).
+func (m *model) jumpMatch(delta int) {
+	if len(m.matches) == 0 {
+		return
+	}
+	m.matchIdx = (m.matchIdx + delta + len(m.matches)) % len(m.matches)
+	m.viewport.SetYOffset(max(0, m.matches[m.matchIdx]-m.viewport.Height/2))
+}
+
 func (m *model) toggleBookmark() {
 	ch := m.book.Chapters[m.chapter]
 	m.st.Book(m.book.Path).ToggleBookmark(store.Bookmark{
@@ -350,14 +459,26 @@ func (m model) View() string {
 	}
 
 	var header, footer string
-	if m.overlay != nil {
+	switch {
+	case m.overlay != nil:
 		header = fmt.Sprintf("%s · %s", m.overlay.title, m.book.Title)
 		if m.overlay.pick != nil {
 			footer = "j/k mover · enter abrir · esc fechar"
 		} else {
 			footer = "esc fechar"
 		}
-	} else {
+	case m.searching:
+		header = fmt.Sprintf("%s · %s", m.book.Title, m.book.Chapters[m.chapter].Title)
+		footer = m.input.View() + "   enter busca · esc cancela"
+	case m.query != "":
+		header = fmt.Sprintf("%s · %s", m.book.Title, m.book.Chapters[m.chapter].Title)
+		if len(m.matches) == 0 {
+			footer = fmt.Sprintf("busca %q · nenhuma ocorrência · esc limpa", m.query)
+		} else {
+			footer = fmt.Sprintf("busca %q · %d/%d · n/N pular · esc limpa",
+				m.query, m.matchIdx+1, len(m.matches))
+		}
+	default:
 		ch := m.book.Chapters[m.chapter]
 		star := ""
 		if m.hasBookmark(m.chapter) {
