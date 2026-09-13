@@ -3,6 +3,7 @@ package ui
 import (
 	_ "embed"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
@@ -105,14 +106,14 @@ func wrapWidth(termWidth int) int {
 	return min(max(20, termWidth-4), maxTextWidth)
 }
 
+var imageRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)\s]+)[^)]*\)`)
+
 func (m *model) setContent() {
 	ch := m.book.Chapters[m.chapter]
 	text := m.book.Text(ch)
 
 	if m.renderer != nil {
-		if rendered, err := m.renderer.Render(text); err == nil {
-			text = rendered
-		}
+		text = m.renderMarkdown(ch, text)
 	}
 
 	// centraliza a coluna de leitura no terminal
@@ -123,6 +124,36 @@ func (m *model) setContent() {
 
 	m.viewport.SetContent(centered)
 	m.viewport.GotoTop()
+}
+
+// renderMarkdown renderiza o capítulo e troca cada referência de imagem pelo
+// desenho em blocos ANSI correspondente.
+func (m *model) renderMarkdown(ch epub.Chapter, md string) string {
+	var out strings.Builder
+	last := 0
+	for _, loc := range imageRefPattern.FindAllStringSubmatchIndex(md, -1) {
+		m.renderSegment(&out, md[last:loc[0]])
+
+		ref := md[loc[2]:loc[3]]
+		if img, err := m.book.Image(ch, ref); err == nil {
+			out.WriteString(renderImage(img))
+		}
+		last = loc[1]
+	}
+	m.renderSegment(&out, md[last:])
+	return out.String()
+}
+
+func (m *model) renderSegment(out *strings.Builder, md string) {
+	if strings.TrimSpace(md) == "" {
+		return
+	}
+	rendered, err := m.renderer.Render(md)
+	if err != nil {
+		out.WriteString(md)
+		return
+	}
+	out.WriteString(rendered)
 }
 
 func (m model) View() string {

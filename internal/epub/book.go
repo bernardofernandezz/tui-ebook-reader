@@ -2,6 +2,9 @@ package epub
 
 import (
 	"fmt"
+	"image"
+	"path"
+	"path/filepath"
 	"strings"
 
 	raitu "github.com/raitucarp/epub"
@@ -11,7 +14,9 @@ type Book struct {
 	Title    string
 	Author   string
 	Chapters []Chapter
+	Path     string
 	reader   raitu.Reader
+	images   map[string]image.Image
 }
 
 type Chapter struct {
@@ -26,7 +31,15 @@ func Open(path string) (*Book, error) {
 		return nil, fmt.Errorf("abrir epub: %w", err)
 	}
 
-	b := &Book{reader: r}
+	b := &Book{
+		reader: r,
+		images: map[string]image.Image{},
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		b.Path = abs
+	} else {
+		b.Path = path
+	}
 
 	if t := r.Title(); len(t) > 0 {
 		b.Title = t[0]
@@ -69,6 +82,31 @@ func (b *Book) Text(ch Chapter) string {
 	return stripFrontmatter(b.reader.ReadContentMarkdownById(ch.ID))
 }
 
+// Image carrega a imagem referenciada no markdown do capítulo (ex.:
+// ../Images/x.jpg), resolvendo o caminho relativo ao documento.
+func (b *Book) Image(ch Chapter, ref string) (image.Image, error) {
+	href := b.resolveImageHref(ch, ref)
+	if img, ok := b.images[href]; ok {
+		return img, nil
+	}
+	for _, try := range []string{href, ref} {
+		if img := b.reader.ReadImageByHref(try); img != nil {
+			b.images[href] = *img
+			return *img, nil
+		}
+	}
+	return nil, fmt.Errorf("imagem não encontrada: %s", ref)
+}
+
+func (b *Book) resolveImageHref(ch Chapter, ref string) string {
+	for _, res := range b.reader.Resources() {
+		if res.ID == ch.ID {
+			return path.Join(path.Dir(res.Href), ref)
+		}
+	}
+	return ref
+}
+
 // stripFrontmatter remove o bloco YAML inicial (--- ... ---) que alguns
 // EPUBs colocam no começo de cada documento.
 func stripFrontmatter(md string) string {
@@ -95,8 +133,8 @@ func firstHeading(md string) string {
 				return title
 			}
 		}
-		// fallback: primeira linha útil
-		if len(line) > 3 {
+		// fallback: primeira linha útil (ignora referências de imagem)
+		if len(line) > 3 && !strings.HasPrefix(line, "!") {
 			if len(line) > 60 {
 				return line[:60] + "..."
 			}
