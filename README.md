@@ -7,15 +7,17 @@ Leitor de EPUB no terminal, escrito em Go. Abre arquivos `.epub`, lista capítul
 ## Recursos
 
 - Leitura de EPUB 2 e EPUB 3 direto no terminal (Bubble Tea + viewport).
-- Navegação por capítulos com `←`/`→` (ou `h`/`l`), TOC e impressão de capítulo no stdout.
-- Texto renderizado como Markdown via glamour, com tema embutido e largura máxima de 76 colunas centralizada.
-- Imagens do livro convertidas para ANSI de 24 bits (blocos `▀`, dois pixels por caractere).
-- Bookmarks persistentes por livro, com lista navegável e salto direto para o ponto marcado.
-- Layout que se adapta ao redimensionamento do terminal.
+- Capítulos vindos do sumário do próprio livro (NCX) e, sem ele, dos documentos do spine.
+- Texto renderizado como Markdown via glamour, com temas `dark`, `light` e `sepia`.
+- Coluna de leitura ajustável e centralizada (40–120 colunas, padrão 76).
+- Imagens do livro convertidas para ANSI (24 bits, com fallback para 256 cores).
+- Busca dentro do capítulo, bookmarks persistentes e retomada automática da leitura.
+- Biblioteca: `tbook list` e abertura pelo nome (`tbook read harry`).
+- Barra de progresso e estatísticas de tempo de leitura.
 
 ## Instalação
 
-Precisa de Go 1.27+ apenas para compilar. Com ele instalado:
+Binários para Linux e macOS ficam nas releases do GitHub. Com Go 1.27+ também dá para instalar direto:
 
 ```sh
 go install github.com/bernardofernandezz/tui-ebook-reader/cmd/tbook@latest
@@ -37,55 +39,73 @@ O projeto não distribui livros: use seus próprios arquivos `.epub` (eles não 
 
 ```sh
 tbook livro.epub            # abre o leitor
-tbook read livro.epub       # idem, de forma explícita
+tbook read harry            # procura "harry" na biblioteca
 tbook toc livro.epub        # lista os capítulos numerados
 tbook cat livro.epub -c 3   # imprime o capítulo 3 no stdout
+tbook list                  # lista os livros da biblioteca
+tbook stats                 # tempo de leitura por livro
+tbook --version             # versão do binário
 tbook --help                # ajuda de qualquer comando
 ```
+
+A biblioteca é o diretório `library_dir` do config (padrão `~/Books`); `read`, `toc` e `cat` aceitam tanto um caminho quanto um nome de arquivo de lá.
 
 ### Atalhos no leitor
 
 | Tecla                     | Ação                                        |
 | ------------------------- | ------------------------------------------- |
 | `←` / `→` ou `h` / `l`    | capítulo anterior / próximo                 |
+| `c`                       | lista de capítulos                          |
 | `j` / `k` ou `↓` / `↑`    | rolar uma linha                             |
 | `d` / `u`                 | meia página para baixo / para cima          |
-| `espaço` / `f`            | avançar uma página                          |
-| `pgup`                    | voltar uma página                           |
-| `b`                       | marcar / desmarcar bookmark no capítulo     |
+| `espaço` / `pgup`         | página para baixo / para cima               |
+| `/`                       | buscar no capítulo                          |
+| `n` / `N`                 | próxima / anterior ocorrência da busca      |
+| `b`                       | marcar / desmarcar bookmark no ponto atual  |
 | `B`                       | abrir a lista de bookmarks                  |
+| `t`                       | trocar o tema                               |
+| `+` / `-`                 | alargar / estreitar a coluna                |
+| `?`                       | ajuda com todos os atalhos                  |
 | `q` ou `ctrl+c`           | sair                                        |
 
-Na lista de bookmarks: `j`/`k` movem, `enter` salta para o ponto marcado e `esc` (ou `B`) fecha.
+Nas listas (capítulos, bookmarks e ajuda): `j`/`k` movem, `enter` abre e `esc` fecha.
 
-Os bookmarks ficam em `~/.config/tbook/bookmarks.json` (ou no diretório equivalente do seu sistema, via `os.UserConfigDir`), indexados pelo caminho absoluto do livro e indicados com `★` no cabeçalho.
+### Onde ficam os dados
+
+Em `os.UserConfigDir()/tbook` (no Linux, `~/.config/tbook`):
+
+- `config.json` — tema, largura da coluna e `library_dir`.
+- `state.json` — posição de leitura, bookmarks e segundos lidos por livro.
 
 ## Como funciona
 
 O código é organizado em `cmd/` + `internal/`, com responsabilidades separadas:
 
-| Pacote                | Papel                                                                                           |
-| --------------------- | ----------------------------------------------------------------------------------------------- |
-| `internal/cli`        | Comandos (`read`, `toc`, `cat`) com Cobra; o comando raiz abre o leitor.                        |
-| `internal/epub`       | Wrapper do parser `raitucarp/epub`: monta a lista de capítulos, extrai título/heading, resolve e cacheia imagens. |
-| `internal/ui`         | TUI Bubble Tea: modos de leitura e bookmarks, viewport, layout centralizado, tema e render ANSI. |
-| `internal/bookmarks`  | Persistência dos bookmarks em JSON, com toggle e ordenação por posição.                         |
+| Pacote           | Papel                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| `internal/cli`   | Comandos (`read`, `toc`, `cat`, `list`, `stats`); o comando raiz abre o leitor.                   |
+| `internal/epub`  | Wrapper do parser `raitucarp/epub`: capítulos via NCX, capa, imagens e limpeza do Markdown.       |
+| `internal/ui`    | TUI Bubble Tea: overlays, temas embutidos, busca, layout centralizado e render ANSI.              |
+| `internal/store` | Config e estado em JSON (posição, bookmarks, tempo), sem banco nem framework.                     |
 
 Detalhes de implementação:
 
-- **Capítulos**: documentos de conteúdo do manifesto viram capítulos na ordem de leitura; documentos muito curtos (capa, copyright) são ignorados e o título vem do primeiro heading do Markdown.
-- **Renderização**: o Markdown passa pelo glamour com o tema embutido em `internal/ui/theme.json` (via `go:embed`). A largura de texto é limitada a 76 colunas e a coluna é centralizada no terminal; ao redimensionar, o capítulo é re-renderizado.
-- **Imagens**: cada referência de imagem é substituída por uma versão reduzida (até 48×24) desenhada com o caractere `▀`, usando a cor do pixel de cima no texto e a do pixel de baixo no fundo — cores em RGB de 24 bits.
-- **Bookmarks**: `internal/bookmarks` grava um JSON com capítulo, percentual de rolagem e rótulo; `b` alterna a marca do capítulo atual e `B` abre a lista.
+- **Capítulos**: o NCX do livro é a fonte principal; sem pelo menos dois destinos válidos, usa-se os documentos do spine, ignorando os muito curtos (capa, copyright).
+- **Renderização**: o Markdown passa pelo glamour com temas embutidos em `internal/ui/themes/` (via `go:embed`). A largura da coluna é limitada e centralizada; o capítulo fica em cache por capítulo/largura.
+- **Imagens**: cada referência é reduzida (até 48×24) e desenhada com `▀`; 24 bits quando disponível, 256 cores como fallback e sem cor em terminais ASCII.
+- **Busca**: a consulta roda sobre as linhas já renderizadas (sem os códigos ANSI) e o viewport pula até a ocorrência.
+- **Persistência**: posição, bookmarks e tempo vão para `state.json`; abrir um livro continua de onde a leitura parou.
 
 ### Estrutura do projeto
 
 ```
 cmd/tbook/main.go          # entrada do binário
-internal/cli/              # comandos Cobra (root, read, toc, cat)
-internal/epub/             # parsing e modelo do livro
-internal/ui/               # TUI, tema e renderização de imagens
-internal/bookmarks/        # bookmarks em JSON
+internal/cli/              # comandos Cobra
+internal/epub/             # parsing, capítulos, capa e imagens
+internal/store/            # config e estado em JSON
+internal/ui/               # TUI, overlays e temas (themes/*.json)
+.github/workflows/         # CI e release
+.goreleaser.yml            # binários para Linux/macOS
 assets/image.png           # screenshot usado neste README
 ```
 
@@ -93,8 +113,9 @@ assets/image.png           # screenshot usado neste README
 
 ```sh
 go run ./cmd/tbook seu-livro.epub   # roda sem gerar binário
-go build ./...                      # compila todos os pacotes
+go test ./...                       # testes
 go vet ./...                        # checagem estática
+go build ./...                      # compila todos os pacotes
 ```
 
 ## Feito com
