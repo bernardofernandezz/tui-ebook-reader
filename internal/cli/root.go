@@ -7,12 +7,20 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "reader",
-	Short: "Leitor de EPUB no terminal",
+	Use:          "tbook [arquivo.epub]",
+	Short:        "Leitor de EPUB no terminal",
+	Args:         cobra.MaximumNArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
+		return runReader(args[0])
+	},
 }
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1) //cobra ja cuida da impressao do erro
+		os.Exit(1) // o cobra já imprime o erro
 	}
 }
