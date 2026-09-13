@@ -7,13 +7,22 @@ import (
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+)
+
+const (
+	headerHeight  = 3
+	footerHeight  = 2
+	verticalSpace = headerHeight + footerHeight
+	maxLineWidth  = 96 // largura máxima da coluna de leitura
 )
 
 type model struct {
 	book     *epub.Book
 	chapter  int
 	viewport viewport.Model
+	renderer *glamour.TermRenderer
 	ready    bool
 	width    int
 	height   int
@@ -51,20 +60,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
+		widthChanged := msg.Width != m.width
 		m.width = msg.Width
 		m.height = msg.Height
-		headerHeight := 3
-		footerHeight := 2
-		verticalMargin := headerHeight + footerHeight
 
+		viewportHeight := max(1, m.height-verticalSpace)
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-verticalMargin)
+			m.viewport = viewport.New(m.width, viewportHeight)
 			m.viewport.YPosition = headerHeight
 			m.ready = true
-			m.setContent()
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - verticalMargin
+			m.viewport.Width = m.width
+			m.viewport.Height = viewportHeight
+		}
+
+		// o renderer depende da largura; ao mudar, re-renderiza o capítulo
+		if widthChanged {
+			if renderer, err := newRenderer(m.width); err == nil {
+				m.renderer = renderer
+			}
+			m.setContent()
 		}
 	}
 
@@ -72,10 +87,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func newRenderer(width int) (*glamour.TermRenderer, error) {
+	return glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(wrapWidth(width)),
+	)
+}
+
+// wrapWidth limita a largura do texto para uma leitura confortável.
+func wrapWidth(termWidth int) int {
+	return min(max(10, termWidth-4), maxLineWidth)
+}
+
 func (m *model) setContent() {
 	ch := m.book.Chapters[m.chapter]
 	text := m.book.Text(ch)
-	m.viewport.SetContent(text)
+
+	if m.renderer != nil {
+		if rendered, err := m.renderer.Render(text); err == nil {
+			text = rendered
+		}
+	}
+
+	// centraliza a coluna de leitura no terminal
+	centered := lipgloss.NewStyle().
+		Width(m.width).
+		Align(lipgloss.Center).
+		Render(text)
+
+	m.viewport.SetContent(centered)
 	m.viewport.GotoTop()
 }
 
@@ -93,26 +133,21 @@ func (m model) View() string {
 	footer := lipgloss.NewStyle().
 		Faint(true).
 		Render(fmt.Sprintf(
-			"capítulo %d/%d  |  ←/→ ou h/l  |  q sair  |  %3.f%%",
+			"capítulo %d/%d  |  ←/→ capítulo  |  j/k, d/u, espaço rolam  |  q sair  |  %3.f%%",
 			m.chapter+1,
 			len(m.book.Chapters),
 			m.viewport.ScrollPercent()*100,
 		))
 
+	rule := strings.Repeat("─", max(10, m.width))
+
 	return strings.Join([]string{
 		header,
-		strings.Repeat("─", max(10, m.width)),
+		rule,
 		m.viewport.View(),
-		strings.Repeat("─", max(10, m.width)),
+		rule,
 		footer,
 	}, "\n")
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func Run(book *epub.Book) error {
