@@ -19,7 +19,7 @@ func (o *overlay) move(delta int) {
 	o.cursor = min(max(0, o.cursor+delta), max(0, len(o.items)-1))
 }
 
-func (o *overlay) view(width int) string {
+func (o *overlay) view(width, textWidth int) string {
 	lines := make([]string, len(o.items))
 	for i, item := range o.items {
 		if o.pick != nil && i == o.cursor {
@@ -30,7 +30,7 @@ func (o *overlay) view(width int) string {
 	}
 
 	block := lipgloss.NewStyle().
-		Width(maxTextWidth).
+		Width(textWidth).
 		Align(lipgloss.Left).
 		Render(strings.Join(lines, "\n"))
 

@@ -1,0 +1,78 @@
+{
+  "document": {
+    "block_suffix": "\n",
+    "color": "94",
+    "margin": 2
+  },
+  "block_quote": {
+    "indent": 1,
+    "indent_token": "▎ ",
+    "color": "137"
+  },
+  "paragraph": {},
+  "list": {
+    "level_indent": 2
+  },
+  "heading": {
+    "block_prefix": "\n",
+    "block_suffix": "\n",
+    "bold": true,
+    "color": "130"
+  },
+  "h1": {
+    "bold": true
+  },
+  "h2": {
+    "bold": true
+  },
+  "h3": {
+    "bold": true
+  },
+  "h4": {
+    "bold": true
+  },
+  "h5": {
+    "bold": true
+  },
+  "h6": {
+    "bold": true,
+    "italic": true
+  },
+  "strikethrough": {
+    "crossed_out": true
+  },
+  "emph": {
+    "italic": true
+  },
+  "strong": {
+    "bold": true
+  },
+  "hr": {
+    "color": "180",
+    "format": "\n────────\n"
+  },
+  "item": {
+    "block_prefix": "• "
+  },
+  "enumeration": {
+    "block_prefix": ". "
+  },
+  "link": {
+    "color": "24",
+    "underline": true
+  },
+  "link_text": {
+    "color": "24"
+  },
+  "code": {
+    "prefix": " ",
+    "suffix": " ",
+    "color": "94",
+    "background_color": "230"
+  },
+  "code_block": {
+    "color": "94",
+    "background_color": "230",
+    "margin": 2
+  }
+}

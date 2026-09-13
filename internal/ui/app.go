@@ -1,8 +1,8 @@
 package ui
 
 import (
-	_ "embed"
 	"fmt"
+	"image"
 	"regexp"
 	"strings"
 	"time"
@@ -14,17 +14,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
-
-//go:embed theme.json
-var themeJSON []byte
 
 const (
 	headerHeight  = 2
 	footerHeight  = 2
 	verticalSpace = headerHeight + footerHeight
-	maxTextWidth  = 76 // largura do texto; o glamour adiciona 2 colunas de margem
 	barWidth      = 12
+
+	minReadWidth = 40
+	maxReadWidth = 120
+	widthStep    = 4
 )
 
 var (
@@ -43,6 +44,8 @@ var helpLines = []string{
 	"n/N          próxima / anterior ocorrência",
 	"b            marcar / desmarcar bookmark",
 	"B            lista de bookmarks",
+	"t            trocar o tema",
+	"+/-          alargar / estreitar a coluna",
 	"?            esta ajuda",
 	"q            sair",
 }
@@ -56,6 +59,9 @@ type model struct {
 	renderer  *glamour.TermRenderer
 	overlay   *overlay
 	input     textinput.Model
+	profile   termenv.Profile
+	themeIdx  int
+	cover     image.Image
 	coverArt  string
 	offset    int // rolagem salva ao abrir um overlay
 	cacheCh   int
@@ -73,13 +79,16 @@ type model struct {
 
 func New(book *epub.Book, cfg *store.Config, st *store.State) *model {
 	m := &model{
-		book:    book,
-		cfg:     cfg,
-		st:      st,
-		cacheCh: -1,
+		book:     book,
+		cfg:      cfg,
+		st:       st,
+		profile:  lipgloss.ColorProfile(),
+		themeIdx: themeIndex(cfg.Theme),
+		cacheCh:  -1,
 	}
 	if cover := book.Cover(); cover != nil {
-		m.coverArt = renderImage(cover)
+		m.cover = cover
+		m.coverArt = renderImage(cover, m.profile, cfg.Width)
 	}
 
 	if pos := st.Book(book.Path).Position; pos.Chapter >= 0 && pos.Chapter < len(book.Chapters) {
@@ -135,6 +144,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			m.openChapters()
 			return m, nil
+		case "t":
+			m.cycleTheme()
+			return m, nil
+		case "+", "=":
+			m.adjustWidth(widthStep)
+			return m, nil
+		case "-", "_":
+			m.adjustWidth(-widthStep)
+			return m, nil
 		case "?":
 			m.openHelp()
 			return m, nil
@@ -163,7 +181,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// o renderer depende da largura; ao mudar, re-renderiza o conteúdo
 		if widthChanged {
-			if renderer, err := newRenderer(m.width); err == nil {
+			if renderer, err := newRenderer(themes[m.themeIdx].glamour, m.width, m.cfg.Width); err == nil {
 				m.renderer = renderer
 			}
 			if m.overlay != nil {
@@ -185,16 +203,49 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func newRenderer(width int) (*glamour.TermRenderer, error) {
+func newRenderer(style []byte, termWidth, maxWidth int) (*glamour.TermRenderer, error) {
 	return glamour.NewTermRenderer(
-		glamour.WithStylesFromJSONBytes(themeJSON),
-		glamour.WithWordWrap(wrapWidth(width)),
+		glamour.WithStylesFromJSONBytes(style),
+		glamour.WithWordWrap(wrapWidth(termWidth, maxWidth)),
 	)
 }
 
 // wrapWidth limita a largura do texto para uma leitura confortável.
-func wrapWidth(termWidth int) int {
-	return min(max(20, termWidth-4), maxTextWidth)
+func wrapWidth(termWidth, maxWidth int) int {
+	if maxWidth <= 0 {
+		maxWidth = store.DefaultWidth
+	}
+	return min(max(20, termWidth-4), maxWidth)
+}
+
+// applyRenderer recria o renderer (tema/largura) e redesenha o conteúdo.
+func (m *model) applyRenderer() {
+	if renderer, err := newRenderer(themes[m.themeIdx].glamour, m.width, m.cfg.Width); err == nil {
+		m.renderer = renderer
+	}
+	m.cacheCh = -1
+	if m.cover != nil {
+		m.coverArt = renderImage(m.cover, m.profile, m.cfg.Width)
+	}
+
+	if m.overlay != nil {
+		m.setOverlayContent()
+	} else {
+		m.setContent()
+	}
+}
+
+func (m *model) cycleTheme() {
+	m.themeIdx = (m.themeIdx + 1) % len(themes)
+	m.cfg.Theme = themes[m.themeIdx].name
+	_ = m.cfg.Save()
+	m.applyRenderer()
+}
+
+func (m *model) adjustWidth(delta int) {
+	m.cfg.Width = min(maxReadWidth, max(minReadWidth, m.cfg.Width+delta))
+	_ = m.cfg.Save()
+	m.applyRenderer()
 }
 
 func (m *model) goToChapter(chapter int) {
@@ -207,7 +258,10 @@ func (m *model) goToChapter(chapter int) {
 	m.savePosition()
 }
 
-var imageRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)\s]+)[^)]*\)`)
+var (
+	imageRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)\s]+)[^)]*\)`)
+	linkPattern     = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+)
 
 func (m *model) setContent() {
 	// centraliza a coluna de leitura no terminal
@@ -255,7 +309,7 @@ func (m *model) renderMarkdown(ch epub.Chapter, md string) string {
 
 		ref := md[loc[2]:loc[3]]
 		if img, err := m.book.Image(ch, ref); err == nil {
-			out.WriteString(renderImage(img))
+			out.WriteString(renderImage(img, m.profile, m.cfg.Width))
 		}
 		last = loc[1]
 	}
@@ -267,6 +321,10 @@ func (m *model) renderSegment(out *strings.Builder, md string) {
 	if strings.TrimSpace(md) == "" {
 		return
 	}
+
+	// no leitor o texto do link basta; a URL só atrapalha
+	md = linkPattern.ReplaceAllString(md, "$1")
+
 	rendered, err := m.renderer.Render(md)
 	if err != nil {
 		out.WriteString(md)
@@ -312,7 +370,7 @@ func (m *model) closeOverlay() {
 }
 
 func (m *model) setOverlayContent() {
-	m.viewport.SetContent(m.overlay.view(m.width))
+	m.viewport.SetContent(m.overlay.view(m.width, m.cfg.Width))
 
 	// mantém o item selecionado visível
 	cursor := m.overlay.cursor
