@@ -66,20 +66,34 @@ func Open(path string) (*Book, error) {
 }
 
 func (b *Book) Text(ch Chapter) string {
-	return b.reader.ReadContentMarkdownById(ch.ID)
+	return stripFrontmatter(b.reader.ReadContentMarkdownById(ch.ID))
+}
+
+// stripFrontmatter remove o bloco YAML inicial (--- ... ---) que alguns
+// EPUBs colocam no começo de cada documento.
+func stripFrontmatter(md string) string {
+	if !strings.HasPrefix(md, "---") {
+		return md
+	}
+	if i := strings.Index(md[3:], "---"); i >= 0 {
+		return md[3+i+3:]
+	}
+	return md
 }
 
 func firstHeading(md string) string {
+	md = stripFrontmatter(md)
+
 	for _, line := range strings.Split(md, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "---") {
 			continue
 		}
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(line[2:])
-		}
-		if strings.HasPrefix(line, "## ") {
-			return strings.TrimSpace(line[3:])
+		// heading de qualquer nível (# até ######)
+		if h := strings.TrimLeft(line, "#"); len(h) < len(line) && strings.HasPrefix(h, " ") {
+			if title := strings.Trim(h, "*— "); title != "" {
+				return title
+			}
 		}
 		// fallback: primeira linha útil
 		if len(line) > 3 {
