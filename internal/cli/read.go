@@ -8,7 +8,7 @@ import (
 )
 
 var readCmd = &cobra.Command{
-	Use:   "read <arquivo.epub>",
+	Use:   "read <arquivo.epub|nome>",
 	Short: "Abre o leitor no terminal",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -16,12 +16,19 @@ var readCmd = &cobra.Command{
 	},
 }
 
-func runReader(path string) error {
+func runReader(name string) error {
+	cfg := store.LoadConfig()
+
+	path, err := resolveBook(name, cfg.LibraryDir)
+	if err != nil {
+		return err
+	}
+
 	book, err := epub.Open(path)
 	if err != nil {
 		return err
 	}
-	return ui.Run(book, store.LoadConfig(), store.LoadState())
+	return ui.Run(book, cfg, store.LoadState())
 }
 
 func init() {

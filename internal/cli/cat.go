@@ -3,18 +3,17 @@ package cli
 import (
 	"fmt"
 
-	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
 	"github.com/spf13/cobra"
 )
 
 var catChapter int
 
 var catCmd = &cobra.Command{
-	Use:   "cat <arquivo.epub>",
+	Use:   "cat <arquivo.epub|nome>",
 	Short: "Imprime um capítulo no stdout",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		book, err := epub.Open(args[0])
+		book, err := openBook(args[0])
 		if err != nil {
 			return err
 		}

@@ -7,7 +7,7 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "tbook [arquivo.epub]",
+	Use:          "tbook [arquivo.epub|nome]",
 	Short:        "Leitor de EPUB no terminal",
 	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
@@ -19,7 +19,8 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Execute() {
+func Execute(version string) {
+	rootCmd.Version = version
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1) // o cobra já imprime o erro
 	}
