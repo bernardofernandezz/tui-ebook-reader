@@ -1,6 +1,7 @@
 package ui
 
 import (
+	_ "embed"
 	"fmt"
 	"strings"
 
@@ -11,12 +12,17 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+//go:embed theme.json
+var themeJSON []byte
+
 const (
-	headerHeight  = 3
+	headerHeight  = 2
 	footerHeight  = 2
 	verticalSpace = headerHeight + footerHeight
-	maxLineWidth  = 96 // largura máxima da coluna de leitura
+	maxTextWidth  = 76 // largura do texto; o glamour adiciona 2 colunas de margem
 )
+
+var chromeStyle = lipgloss.NewStyle().Faint(true)
 
 type model struct {
 	book     *epub.Book
@@ -89,14 +95,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func newRenderer(width int) (*glamour.TermRenderer, error) {
 	return glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStylesFromJSONBytes(themeJSON),
 		glamour.WithWordWrap(wrapWidth(width)),
 	)
 }
 
 // wrapWidth limita a largura do texto para uma leitura confortável.
 func wrapWidth(termWidth int) int {
-	return min(max(10, termWidth-4), maxLineWidth)
+	return min(max(20, termWidth-4), maxTextWidth)
 }
 
 func (m *model) setContent() {
@@ -126,27 +132,20 @@ func (m model) View() string {
 
 	ch := m.book.Chapters[m.chapter]
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Render(fmt.Sprintf("%s — %s", m.book.Title, ch.Title))
-
-	footer := lipgloss.NewStyle().
-		Faint(true).
-		Render(fmt.Sprintf(
-			"capítulo %d/%d  |  ←/→ capítulo  |  j/k, d/u, espaço rolam  |  q sair  |  %3.f%%",
-			m.chapter+1,
-			len(m.book.Chapters),
-			m.viewport.ScrollPercent()*100,
-		))
-
-	rule := strings.Repeat("─", max(10, m.width))
+	header := chromeStyle.Render(fmt.Sprintf("%s · %s", m.book.Title, ch.Title))
+	footer := chromeStyle.Render(fmt.Sprintf(
+		"capítulo %d/%d · %.0f%% · q sair",
+		m.chapter+1,
+		len(m.book.Chapters),
+		m.viewport.ScrollPercent()*100,
+	))
 
 	return strings.Join([]string{
-		header,
-		rule,
+		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, header),
+		"",
 		m.viewport.View(),
-		rule,
-		footer,
+		"",
+		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, footer),
 	}, "\n")
 }
 
