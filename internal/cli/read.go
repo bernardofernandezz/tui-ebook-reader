@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
+	"github.com/bernardofernandezz/tui-ebook-reader/internal/store"
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +21,7 @@ func runReader(path string) error {
 	if err != nil {
 		return err
 	}
-	return ui.Run(book)
+	return ui.Run(book, store.LoadConfig(), store.LoadState())
 }
 
 func init() {

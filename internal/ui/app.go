@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
-	"github.com/bernardofernandezz/tui-ebook-reader/internal/bookmarks"
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
+	"github.com/bernardofernandezz/tui-ebook-reader/internal/store"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -35,11 +36,12 @@ const (
 
 type model struct {
 	book     *epub.Book
+	cfg      *store.Config
+	st       *store.State
 	chapter  int
 	viewport viewport.Model
 	renderer *glamour.TermRenderer
-	store    *bookmarks.Store
-	marks    []bookmarks.Bookmark
+	marks    []store.Bookmark
 	mode     mode
 	cursor   int
 	offset   int // rolagem salva ao abrir a lista de bookmarks
@@ -48,12 +50,12 @@ type model struct {
 	height   int
 }
 
-func New(book *epub.Book) model {
-	store := bookmarks.Load()
+func New(book *epub.Book, cfg *store.Config, st *store.State) model {
 	return model{
 		book:  book,
-		store: store,
-		marks: store.List(book.Path),
+		cfg:   cfg,
+		st:    st,
+		marks: st.Book(book.Path).SortedBookmarks(),
 	}
 }
 
@@ -76,11 +78,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.chapter < len(m.book.Chapters)-1 {
 				m.chapter++
 				m.setContent()
+				m.savePosition()
 			}
 		case "left", "h", "p":
 			if m.chapter > 0 {
 				m.chapter--
 				m.setContent()
+				m.savePosition()
 			}
 		case "b":
 			// "b" também é page-up no viewport; por isso não repassamos a tecla
@@ -204,12 +208,14 @@ func (m model) updateBookmarks(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) toggleBookmark() {
-	m.store.Toggle(m.book.Path, bookmarks.Bookmark{
+	ch := m.book.Chapters[m.chapter]
+	m.st.Book(m.book.Path).ToggleBookmark(store.Bookmark{
 		Chapter: m.chapter,
 		Percent: int(m.viewport.ScrollPercent() * 100),
-		Label:   m.book.Chapters[m.chapter].Title,
+		Label:   ch.Title,
 	})
-	m.marks = m.store.List(m.book.Path)
+	m.marks = m.st.Book(m.book.Path).SortedBookmarks()
+	_ = m.st.Save()
 }
 
 func (m *model) openBookmarks() {
@@ -234,6 +240,7 @@ func (m *model) jumpToBookmark() {
 	m.mode = modeReading
 	m.setContent()
 	m.scrollToPercent(bm.Percent)
+	m.savePosition()
 }
 
 func (m *model) scrollToPercent(percent int) {
@@ -269,12 +276,15 @@ func (m *model) setBookmarkList() {
 }
 
 func (m model) hasBookmark(chapter int) bool {
-	for _, b := range m.marks {
-		if b.Chapter == chapter {
-			return true
-		}
+	return m.st.Book(m.book.Path).HasBookmark(chapter)
+}
+
+func (m *model) savePosition() {
+	m.st.Book(m.book.Path).Position = store.Position{
+		Chapter: m.chapter,
+		Percent: int(m.viewport.ScrollPercent() * 100),
 	}
-	return false
+	_ = m.st.Save()
 }
 
 func (m model) View() string {
@@ -312,11 +322,18 @@ func (m model) View() string {
 	}, "\n")
 }
 
-func Run(book *epub.Book) error {
-	p := tea.NewProgram(
-		New(book),
-		tea.WithAltScreen(),
-	)
-	_, err := p.Run()
-	return err
+func Run(book *epub.Book, cfg *store.Config, st *store.State) error {
+	start := time.Now()
+
+	p := tea.NewProgram(New(book, cfg, st), tea.WithAltScreen())
+	final, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	if m, ok := final.(model); ok {
+		m.savePosition()
+	}
+	st.Book(book.Path).Seconds += int(time.Since(start).Seconds())
+	return st.Save()
 }
