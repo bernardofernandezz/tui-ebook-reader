@@ -23,10 +23,15 @@ tbook cat livro.epub -c 3   # imprime o capítulo 3 no stdout
 
 ## Atalhos no leitor
 
-| tecla                  | ação                         |
-| ---------------------- | ---------------------------- |
-| `←` / `→` ou `h` / `l` | capítulo anterior / próximo  |
-| `j` / `k` ou `↑` / `↓` | rolar linha a linha          |
-| `d` / `u`              | meia página                  |
-| `espaço` / `b`         | página inteira               |
-| `q`                    | sair                         |
+| tecla                  | ação                                          |
+| ---------------------- | --------------------------------------------- |
+| `←` / `→` ou `h` / `l` | capítulo anterior / próximo                   |
+| `j` / `k` ou `↑` / `↓` | rolar linha a linha                           |
+| `d` / `u`              | meia página                                   |
+| `espaço` / `pgup`      | página inteira                                |
+| `b`                    | marcar / desmarcar bookmark no ponto atual    |
+| `B`                    | abrir a lista de bookmarks (`enter` vai até)  |
+| `q`                    | sair                                          |
+
+Os bookmarks ficam em `~/.config/tbook/bookmarks.json`. Imagens do EPUB são
+desenhadas no próprio texto com blocos coloridos.
