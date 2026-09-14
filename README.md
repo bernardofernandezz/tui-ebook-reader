@@ -1,56 +1,42 @@
 # tbook
 
-Leitor de EPUB no terminal, escrito em Go. Abre arquivos `.epub`, lista capítulos, renderiza o texto em uma coluna confortável de ler e desenha as imagens do livro com blocos coloridos — tudo sem sair do terminal.
+Um leitor de EPUB que mora no terminal. Abre o livro, mostra a capa, desenha as imagens em blocos coloridos e retoma a leitura exatamente de onde você parou — sem app pesado, sem janelas, sem distração.
 
 ![tbook lendo um EPUB no terminal](assets/image.png)
 
-## Recursos
+## A experiência
 
-- Leitura de EPUB 2 e EPUB 3 direto no terminal (Bubble Tea + viewport).
-- Capítulos vindos do sumário do próprio livro (NCX) e, sem ele, dos documentos do spine.
-- Texto renderizado como Markdown via glamour, com temas `dark`, `light` e `sepia`.
-- Coluna de leitura ajustável e centralizada (40–120 colunas, padrão 76).
-- Imagens do livro convertidas para ANSI (24 bits, com fallback para 256 cores).
-- Busca dentro do capítulo, bookmarks persistentes e retomada automática da leitura.
-- Biblioteca: `tbook list` e abertura pelo nome (`tbook read harry`).
-- Barra de progresso e estatísticas de tempo de leitura.
+Você abre o terminal, digita `tbook livro.epub` e o livro está lá. Setas trocam de capítulo, `/` busca um trecho, `b` marca o ponto, `t` troca o tema. Ao sair, o tbook guarda posição, bookmarks e tempo de leitura — na próxima vez, você cai no mesmo parágrafo.
 
-## Instalação
+- **Leitura sem distração** — uma coluna centralizada de 40 a 120 colunas (padrão 76), em tema `dark`, `light` ou `sepia`.
+- **Capa e ilustrações** — a capa abre a primeira página; as imagens do livro viram arte ANSI (24 bits, com fallback para 256 cores).
+- **Busca e bookmarks** — `/` encontra, `n`/`N` pulam entre ocorrências; `b` marca o ponto e `B` leva direto até ele.
+- **Memória de leitura** — posição, bookmarks e tempo por livro; `tbook stats` mostra seu histórico.
+- **Sua estante no terminal** — `tbook library` navega pela biblioteca com capa e progresso ao lado; `tbook read harry` abre pelo nome.
+- **Clássicos de graça** — `tbook search` e `tbook download` buscam e baixam EPUBs do Project Gutenberg direto para a sua biblioteca.
 
-Binários para Linux e macOS ficam nas releases do GitHub. Com Go 1.27+ também dá para instalar direto:
+## Começando em 30 segundos
 
-```sh
-go install github.com/bernardofernandezz/tui-ebook-reader/cmd/tbook@latest
-```
-
-O binário `tbook` vai para `$(go env GOPATH)/bin` — mantenha essa pasta no `PATH`.
-
-### A partir do código
+Sem nenhum livro no computador? Busque um clássico e baixe direto para a estante:
 
 ```sh
-git clone https://github.com/bernardofernandezz/tui-ebook-reader
-cd tui-ebook-reader
-go build -o tbook ./cmd/tbook
+tbook search "pride and prejudice"
+  1342  Pride and Prejudice — Austen, Jane
+
+tbook download 1342
+baixando Pride and Prejudice (Austen, Jane)...
+salvo em ~/Books/Pride and Prejudice.epub
+
+tbook library
 ```
 
-O projeto não distribui livros: use seus próprios arquivos `.epub` (eles não são versionados).
-
-## Uso
+Na tela da biblioteca: `j`/`k` para navegar, `enter` abre o livro, `q` sai. Já tem um arquivo? É só apontar:
 
 ```sh
-tbook livro.epub            # abre o leitor
-tbook read harry            # procura "harry" na biblioteca
-tbook toc livro.epub        # lista os capítulos numerados
-tbook cat livro.epub -c 3   # imprime o capítulo 3 no stdout
-tbook list                  # lista os livros da biblioteca
-tbook stats                 # tempo de leitura por livro
-tbook --version             # versão do binário
-tbook --help                # ajuda de qualquer comando
+tbook livro.epub
 ```
 
-A biblioteca é o diretório `library_dir` do config (padrão `~/Books`); `read`, `toc` e `cat` aceitam tanto um caminho quanto um nome de arquivo de lá.
-
-### Atalhos no leitor
+## Durante a leitura
 
 | Tecla                     | Ação                                        |
 | ------------------------- | ------------------------------------------- |
@@ -70,6 +56,18 @@ A biblioteca é o diretório `library_dir` do config (padrão `~/Books`); `read`
 
 Nas listas (capítulos, bookmarks e ajuda): `j`/`k` movem, `enter` abre e `esc` fecha.
 
+### Sua estante
+
+```sh
+tbook list                 # lista os livros da biblioteca
+tbook read harry           # abre pelo nome, sem digitar o caminho
+tbook toc livro.epub       # capítulos numerados
+tbook cat livro.epub -c 3  # imprime o capítulo 3 no stdout
+tbook stats                # tempo de leitura por livro
+```
+
+A biblioteca é o diretório `library_dir` do config (padrão `~/Books`); `read`, `toc` e `cat` aceitam tanto um caminho quanto um nome de lá.
+
 ### Onde ficam os dados
 
 Em `os.UserConfigDir()/tbook` (no Linux, `~/.config/tbook`):
@@ -77,40 +75,47 @@ Em `os.UserConfigDir()/tbook` (no Linux, `~/.config/tbook`):
 - `config.json` — tema, largura da coluna e `library_dir`.
 - `state.json` — posição de leitura, bookmarks e segundos lidos por livro.
 
-## Como funciona
+## Instalação
 
-O código é organizado em `cmd/` + `internal/`, com responsabilidades separadas:
+Binários para Linux e macOS ficam nas releases do GitHub. Com Go 1.27+ também dá para instalar direto:
+
+```sh
+go install github.com/bernardofernandezz/tui-ebook-reader/cmd/tbook@latest
+```
+
+O binário `tbook` vai para `$(go env GOPATH)/bin` — mantenha essa pasta no `PATH`.
+
+A partir do código:
+
+```sh
+git clone https://github.com/bernardofernandezz/tui-ebook-reader
+cd tui-ebook-reader
+go build -o tbook ./cmd/tbook
+```
+
+O tbook lê EPUB 2 e 3 **sem DRM** — arquivos protegidos não abrem. O projeto não distribui livros: seus `.epub` ficam só com você (nada disso é versionado).
+
+## Por baixo do capô
+
+Para quem gosta dos detalhes:
+
+- **Capítulos**: o NCX do livro manda; sem ele, os documentos do spine decidem, ignorando os muito curtos (capa, copyright).
+- **Renderização**: Markdown via glamour com temas embutidos em `internal/ui/themes/` (via `go:embed`), com cache por capítulo/largura.
+- **Imagens**: cada referência é reduzida (até 48×24) e desenhada com `▀`.
+- **Sessão**: `internal/core` guarda capítulo, posição, bookmarks e tempo — sem nada de terminal; a TUI é só uma consumidora.
+- **Persistência**: JSON puro, sem banco nem framework.
 
 | Pacote           | Papel                                                                                            |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | `internal/core`  | Sessão de leitura: capítulo atual, posição, bookmarks e tempo — independente de terminal.        |
-| `internal/cli`   | Comandos (`read`, `toc`, `cat`, `list`, `stats`); o comando raiz abre o leitor.                   |
+| `internal/cli`   | Comandos (`read`, `toc`, `cat`, `list`, `library`, `search`, `download`, `stats`).               |
 | `internal/epub`  | Wrapper do parser `raitucarp/epub`: capítulos via NCX, capa, imagens e limpeza do Markdown.       |
 | `internal/ui`    | TUI Bubble Tea: overlays, temas embutidos, busca, layout centralizado e render ANSI.              |
 | `internal/store` | Config e estado em JSON (posição, bookmarks, tempo), sem banco nem framework.                     |
 
-Detalhes de implementação:
+## Próximos passos
 
-- **Capítulos**: o NCX do livro é a fonte principal; sem pelo menos dois destinos válidos, usa-se os documentos do spine, ignorando os muito curtos (capa, copyright).
-- **Renderização**: o Markdown passa pelo glamour com temas embutidos em `internal/ui/themes/` (via `go:embed`). A largura da coluna é limitada e centralizada; o capítulo fica em cache por capítulo/largura.
-- **Imagens**: cada referência é reduzida (até 48×24) e desenhada com `▀`; 24 bits quando disponível, 256 cores como fallback e sem cor em terminais ASCII.
-- **Busca**: a consulta roda sobre as linhas já renderizadas (sem os códigos ANSI) e o viewport pula até a ocorrência.
-- **Persistência**: posição, bookmarks e tempo vão para `state.json`; abrir um livro continua de onde a leitura parou.
-- **Sessão**: `internal/core` concentra capítulo atual, posição e bookmarks; a TUI desenha e só informa o progresso.
-
-### Estrutura do projeto
-
-```
-cmd/tbook/main.go          # entrada do binário
-internal/core/             # sessão de leitura (capítulo, posição, bookmarks, tempo)
-internal/cli/              # comandos Cobra
-internal/epub/             # parsing, capítulos, capa e imagens
-internal/store/            # config e estado em JSON
-internal/ui/               # TUI, overlays e temas (themes/*.json)
-.github/workflows/         # CI e release
-.goreleaser.yml            # binários para Linux/macOS
-assets/image.png           # screenshot usado neste README
-```
+Posição de leitura que sobrevive à troca de tela, API HTTP local e um leitor no navegador do celular: é para onde o núcleo aponta agora.
 
 ## Desenvolvimento
 
@@ -127,3 +132,4 @@ go build ./...                      # compila todos os pacotes
 - [Glamour](https://github.com/charmbracelet/glamour) — renderização de Markdown no terminal.
 - [raitucarp/epub](https://github.com/raitucarp/epub) — parsing de EPUB.
 - [Cobra](https://github.com/spf13/cobra) — linha de comando.
+- [Gutendex](https://gutendex.com) — catálogo do Project Gutenberg.

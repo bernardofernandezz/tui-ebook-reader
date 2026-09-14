@@ -20,7 +20,7 @@ Projeto de estudos. O autor está aprendendo:
 Estado aproximado:
 - leitura no terminal já funciona: biblioteca, temas, busca, bookmarks e stats
 - `internal/core` concentra a sessão de leitura (capítulo, posição, bookmarks, tempo), independente de terminal
-- o roadmap de evolução (posição portável, API, mobile) está em `PLANO.md`
+- o roadmap de evolução (posição portável, API HTTP, leitor no celular) segue em aberto
 
 ## Como o assistente deve responder
 
