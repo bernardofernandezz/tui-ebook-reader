@@ -83,6 +83,7 @@ O código é organizado em `cmd/` + `internal/`, com responsabilidades separadas
 
 | Pacote           | Papel                                                                                            |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
+| `internal/core`  | Sessão de leitura: capítulo atual, posição, bookmarks e tempo — independente de terminal.        |
 | `internal/cli`   | Comandos (`read`, `toc`, `cat`, `list`, `stats`); o comando raiz abre o leitor.                   |
 | `internal/epub`  | Wrapper do parser `raitucarp/epub`: capítulos via NCX, capa, imagens e limpeza do Markdown.       |
 | `internal/ui`    | TUI Bubble Tea: overlays, temas embutidos, busca, layout centralizado e render ANSI.              |
@@ -95,11 +96,13 @@ Detalhes de implementação:
 - **Imagens**: cada referência é reduzida (até 48×24) e desenhada com `▀`; 24 bits quando disponível, 256 cores como fallback e sem cor em terminais ASCII.
 - **Busca**: a consulta roda sobre as linhas já renderizadas (sem os códigos ANSI) e o viewport pula até a ocorrência.
 - **Persistência**: posição, bookmarks e tempo vão para `state.json`; abrir um livro continua de onde a leitura parou.
+- **Sessão**: `internal/core` concentra capítulo atual, posição e bookmarks; a TUI desenha e só informa o progresso.
 
 ### Estrutura do projeto
 
 ```
 cmd/tbook/main.go          # entrada do binário
+internal/core/             # sessão de leitura (capítulo, posição, bookmarks, tempo)
 internal/cli/              # comandos Cobra
 internal/epub/             # parsing, capítulos, capa e imagens
 internal/store/            # config e estado em JSON
