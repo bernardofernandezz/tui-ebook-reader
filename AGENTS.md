@@ -18,9 +18,9 @@ Projeto de estudos. O autor está aprendendo:
 - TUI com Bubble Tea
 
 Estado aproximado:
-- abrir EPUB e ler metadados já funciona
-- extração de texto/Markdown já foi explorada
-- MVP de TUI (viewport + troca de capítulo) está em andamento
+- leitura no terminal já funciona: biblioteca, temas, busca, bookmarks e stats
+- `internal/core` concentra a sessão de leitura (capítulo, posição, bookmarks, tempo), independente de terminal
+- o roadmap de evolução (posição portável, API HTTP, leitor no celular) segue em aberto
 
 ## Como o assistente deve responder
 

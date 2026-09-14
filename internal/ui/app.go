@@ -5,8 +5,8 @@ import (
 	"image"
 	"regexp"
 	"strings"
-	"time"
 
+	"github.com/bernardofernandezz/tui-ebook-reader/internal/core"
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/epub"
 	"github.com/bernardofernandezz/tui-ebook-reader/internal/store"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -51,10 +51,8 @@ var helpLines = []string{
 }
 
 type model struct {
-	book      *epub.Book
+	session   *core.Session
 	cfg       *store.Config
-	st        *store.State
-	chapter   int
 	viewport  viewport.Model
 	renderer  *glamour.TermRenderer
 	overlay   *overlay
@@ -77,22 +75,21 @@ type model struct {
 	height    int
 }
 
-func New(book *epub.Book, cfg *store.Config, st *store.State) *model {
+func New(session *core.Session, cfg *store.Config) *model {
 	m := &model{
-		book:     book,
+		session:  session,
 		cfg:      cfg,
-		st:       st,
 		profile:  lipgloss.ColorProfile(),
 		themeIdx: themeIndex(cfg.Theme),
 		cacheCh:  -1,
 	}
-	if cover := book.Cover(); cover != nil {
+	if cover := session.Book().Cover(); cover != nil {
 		m.cover = cover
 		m.coverArt = renderImage(cover, m.profile, cfg.Width)
 	}
 
-	if pos := st.Book(book.Path).Position; pos.Chapter >= 0 && pos.Chapter < len(book.Chapters) {
-		m.chapter = pos.Chapter
+	// só retoma o scroll se a posição salva for deste capítulo
+	if pos := session.Position(); pos.Chapter == session.Chapter() {
 		m.resume = pos.Percent
 	}
 
@@ -123,14 +120,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "right", "l":
-			m.goToChapter(m.chapter + 1)
+			m.goToChapter(m.session.Chapter() + 1)
 		case "left", "h", "p":
-			m.goToChapter(m.chapter - 1)
+			m.goToChapter(m.session.Chapter() - 1)
 		case "n":
 			if m.query != "" {
 				m.jumpMatch(1)
 			} else {
-				m.goToChapter(m.chapter + 1)
+				m.goToChapter(m.session.Chapter() + 1)
 			}
 		case "N":
 			m.jumpMatch(-1)
@@ -249,13 +246,12 @@ func (m *model) adjustWidth(delta int) {
 }
 
 func (m *model) goToChapter(chapter int) {
-	if chapter < 0 || chapter >= len(m.book.Chapters) {
+	if !m.session.GoTo(chapter) {
 		return
 	}
 	m.clearSearch()
-	m.chapter = chapter
 	m.setContent()
-	m.savePosition()
+	m.saveProgress()
 }
 
 var (
@@ -277,7 +273,7 @@ func (m *model) setContent() {
 // chapterText é o conteúdo do capítulo atual, com a capa na primeira página.
 func (m *model) chapterText() string {
 	text := m.chapterContent()
-	if m.chapter == 0 && m.coverArt != "" {
+	if m.session.Chapter() == 0 && m.coverArt != "" {
 		text = m.coverArt + "\n" + text
 	}
 	return text
@@ -285,17 +281,17 @@ func (m *model) chapterText() string {
 
 // chapterContent renderiza o capítulo atual, com cache por capítulo/largura.
 func (m *model) chapterContent() string {
-	if m.cacheCh == m.chapter && m.cacheW == m.width {
+	if m.cacheCh == m.session.Chapter() && m.cacheW == m.width {
 		return m.cache
 	}
 
-	ch := m.book.Chapters[m.chapter]
-	text := m.book.Text(ch)
+	ch := m.session.Book().Chapters[m.session.Chapter()]
+	text := m.session.Book().Text(ch)
 	if m.renderer != nil {
 		text = m.renderMarkdown(ch, text)
 	}
 
-	m.cacheCh, m.cacheW, m.cache = m.chapter, m.width, text
+	m.cacheCh, m.cacheW, m.cache = m.session.Chapter(), m.width, text
 	return text
 }
 
@@ -308,7 +304,7 @@ func (m *model) renderMarkdown(ch epub.Chapter, md string) string {
 		m.renderSegment(&out, md[last:loc[0]])
 
 		ref := md[loc[2]:loc[3]]
-		if img, err := m.book.Image(ch, ref); err == nil {
+		if img, err := m.session.Book().Image(ch, ref); err == nil {
 			out.WriteString(renderImage(img, m.profile, m.cfg.Width))
 		}
 		last = loc[1]
@@ -383,8 +379,8 @@ func (m *model) setOverlayContent() {
 }
 
 func (m *model) openChapters() {
-	items := make([]string, len(m.book.Chapters))
-	for i, ch := range m.book.Chapters {
+	items := make([]string, len(m.session.Book().Chapters))
+	for i, ch := range m.session.Book().Chapters {
 		items[i] = fmt.Sprintf("%2d  %s", i+1, ch.Title)
 	}
 	m.openOverlay("capítulos", items, func(i int) {
@@ -394,7 +390,7 @@ func (m *model) openChapters() {
 }
 
 func (m *model) openBookmarks() {
-	marks := m.st.Book(m.book.Path).SortedBookmarks()
+	marks := m.session.Bookmarks()
 	if len(marks) == 0 {
 		m.openOverlay("bookmarks", []string{"nenhum bookmark ainda; pressione b durante a leitura"}, nil)
 		return
@@ -407,10 +403,10 @@ func (m *model) openBookmarks() {
 	m.openOverlay("bookmarks", items, func(i int) {
 		bm := marks[i]
 		m.overlay = nil
-		m.chapter = bm.Chapter
+		m.session.GoTo(bm.Chapter)
 		m.setContent()
 		m.scrollToPercent(bm.Percent)
-		m.savePosition()
+		m.saveProgress()
 	})
 }
 
@@ -477,13 +473,9 @@ func (m *model) jumpMatch(delta int) {
 }
 
 func (m *model) toggleBookmark() {
-	ch := m.book.Chapters[m.chapter]
-	m.st.Book(m.book.Path).ToggleBookmark(store.Bookmark{
-		Chapter: m.chapter,
-		Percent: int(m.viewport.ScrollPercent() * 100),
-		Label:   ch.Title,
-	})
-	_ = m.st.Save()
+	ch := m.session.Book().Chapters[m.session.Chapter()]
+	m.session.ToggleBookmark(int(m.viewport.ScrollPercent()*100), ch.Title)
+	_ = m.session.Save()
 }
 
 func (m *model) scrollToPercent(percent int) {
@@ -495,15 +487,12 @@ func (m *model) scrollToPercent(percent int) {
 }
 
 func (m model) hasBookmark(chapter int) bool {
-	return m.st.Book(m.book.Path).HasBookmark(chapter)
+	return m.session.HasBookmark(chapter)
 }
 
-func (m *model) savePosition() {
-	m.st.Book(m.book.Path).Position = store.Position{
-		Chapter: m.chapter,
-		Percent: int(m.viewport.ScrollPercent() * 100),
-	}
-	_ = m.st.Save()
+func (m *model) saveProgress() {
+	m.session.UpdateProgress(int(m.viewport.ScrollPercent() * 100))
+	_ = m.session.Save()
 }
 
 func progressBar(percent float64, width int) string {
@@ -516,20 +505,23 @@ func (m model) View() string {
 		return "carregando..."
 	}
 
+	book := m.session.Book()
+	chapter := m.session.Chapter()
+
 	var header, footer string
 	switch {
 	case m.overlay != nil:
-		header = fmt.Sprintf("%s · %s", m.overlay.title, m.book.Title)
+		header = fmt.Sprintf("%s · %s", m.overlay.title, book.Title)
 		if m.overlay.pick != nil {
 			footer = "j/k mover · enter abrir · esc fechar"
 		} else {
 			footer = "esc fechar"
 		}
 	case m.searching:
-		header = fmt.Sprintf("%s · %s", m.book.Title, m.book.Chapters[m.chapter].Title)
+		header = fmt.Sprintf("%s · %s", book.Title, book.Chapters[chapter].Title)
 		footer = m.input.View() + "   enter busca · esc cancela"
 	case m.query != "":
-		header = fmt.Sprintf("%s · %s", m.book.Title, m.book.Chapters[m.chapter].Title)
+		header = fmt.Sprintf("%s · %s", book.Title, book.Chapters[chapter].Title)
 		if len(m.matches) == 0 {
 			footer = fmt.Sprintf("busca %q · nenhuma ocorrência · esc limpa", m.query)
 		} else {
@@ -537,15 +529,15 @@ func (m model) View() string {
 				m.query, m.matchIdx+1, len(m.matches))
 		}
 	default:
-		ch := m.book.Chapters[m.chapter]
+		ch := book.Chapters[chapter]
 		star := ""
-		if m.hasBookmark(m.chapter) {
+		if m.hasBookmark(chapter) {
 			star = " · ★"
 		}
-		header = fmt.Sprintf("%s · %s", m.book.Title, ch.Title)
+		header = fmt.Sprintf("%s · %s", book.Title, ch.Title)
 		footer = fmt.Sprintf("capítulo %d/%d · %s %.0f%%%s · ? ajuda",
-			m.chapter+1,
-			len(m.book.Chapters),
+			chapter+1,
+			len(book.Chapters),
 			progressBar(m.viewport.ScrollPercent(), barWidth),
 			m.viewport.ScrollPercent()*100,
 			star,
@@ -561,18 +553,15 @@ func (m model) View() string {
 	}, "\n")
 }
 
-func Run(book *epub.Book, cfg *store.Config, st *store.State) error {
-	start := time.Now()
-
-	p := tea.NewProgram(New(book, cfg, st), tea.WithAltScreen())
+func Run(session *core.Session, cfg *store.Config) error {
+	p := tea.NewProgram(New(session, cfg), tea.WithAltScreen())
 	final, err := p.Run()
 	if err != nil {
 		return err
 	}
 
 	if m, ok := final.(*model); ok {
-		m.savePosition()
+		m.session.UpdateProgress(int(m.viewport.ScrollPercent() * 100))
 	}
-	st.Book(book.Path).Seconds += int(time.Since(start).Seconds())
-	return st.Save()
+	return session.Close()
 }
